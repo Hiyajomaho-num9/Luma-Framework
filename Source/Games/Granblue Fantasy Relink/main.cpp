@@ -675,13 +675,17 @@ public:
       g_device_data_ptr.store(&device_data, std::memory_order_release);
       g_native_device_ptr.store(native_device, std::memory_order_release);
 
-      ResolveGBFRAddresses();
+      if (!ResolveGBFRAddresses())
+      {
+         reshade::log::message(
+            reshade::log::level::warning,
+            "GBFR sigscan: incomplete; native GBFR hooks disabled for safety");
+         return;
+      }
 
       if (!g_rt_creation_hook)
       {
-         void* rt_creation_fn = ResolveGBFRCodeOrFallback(
-            g_resolved_addresses.initialize_dx11_rendering_pipeline,
-            kInitializeDX11RenderingPipeline_RVA);
+         void* rt_creation_fn = g_resolved_addresses.initialize_dx11_rendering_pipeline;
          if (rt_creation_fn)
          {
             g_rt_creation_hook = safetyhook::create_inline(
@@ -693,9 +697,7 @@ public:
 #if ENABLE_UI_VIEWPORT_SCALING_HOOK
       if (!g_dispatch_viewport_hook)
       {
-         void* dispatch_fn = ResolveGBFRCodeOrFallback(
-            g_resolved_addresses.dispatch_render_pass_viewport,
-            kDispatchRenderPassViewport_RVA);
+         void* dispatch_fn = g_resolved_addresses.dispatch_render_pass_viewport;
          if (dispatch_fn)
          {
             g_dispatch_viewport_hook = safetyhook::create_inline(
@@ -706,9 +708,7 @@ public:
 
       if (!g_ui_orchestrator_hook)
       {
-         void* ui_orchestrator_fn = ResolveGBFRCodeOrFallback(
-            g_resolved_addresses.ui_render_orchestrator,
-            kUIRenderOrchestrator_RVA);
+         void* ui_orchestrator_fn = g_resolved_addresses.ui_render_orchestrator;
          if (ui_orchestrator_fn)
          {
             g_ui_orchestrator_hook = safetyhook::create_mid(
@@ -723,9 +723,7 @@ public:
 #ifdef PATCH_JITTER_TABLE_INIT
       if (!g_taa_init_hook)
       {
-         void* taa_init_fn = ResolveGBFRCodeOrFallback(
-            g_resolved_addresses.temporal_aa_component_init,
-            kTemporalAntiAliasingComponent_Init_RVA);
+         void* taa_init_fn = g_resolved_addresses.temporal_aa_component_init;
          if (taa_init_fn)
          {
             g_taa_init_hook = safetyhook::create_inline(
@@ -737,9 +735,7 @@ public:
 
       if (!g_jitter_write_hook)
       {
-         void* jitter_write_site = ResolveGBFRCodeOrFallback(
-            g_resolved_addresses.jitter_write_site,
-            kJitterWrite_RVA);
+         void* jitter_write_site = g_resolved_addresses.jitter_write_site;
          if (jitter_write_site)
          {
             g_jitter_write_hook = safetyhook::create_mid(
@@ -1271,7 +1267,7 @@ public:
             else
                ImGui::TextUnformatted("N/A");
             ImGui::TableSetColumnIndex(2);
-            ImGui::TextUnformatted(from_signature ? "Signature" : "RVA fallback");
+            ImGui::TextUnformatted(from_signature ? "Signature" : "Unavailable");
          };
 
          const auto draw_code_addr_row = [](const char* label, void* resolved_abs, uintptr_t fallback_rva)
@@ -1288,7 +1284,7 @@ public:
             else
                ImGui::TextUnformatted("N/A");
             ImGui::TableSetColumnIndex(2);
-            ImGui::TextUnformatted(from_signature ? "Signature" : "RVA fallback");
+            ImGui::TextUnformatted(from_signature ? "Signature" : "Unavailable");
          };
 
          draw_code_addr_row("InitializeDX11RenderingPipeline", g_resolved_addresses.initialize_dx11_rendering_pipeline, kInitializeDX11RenderingPipeline_RVA);
@@ -1304,6 +1300,8 @@ public:
          draw_data_addr_row("g_renderWidth", g_resolved_addresses.render_width, kRenderWidth_RVA);
          draw_data_addr_row("g_renderHeight", g_resolved_addresses.render_height, kRenderHeight_RVA);
          draw_data_addr_row("g_camera", g_resolved_addresses.camera_global, kCameraGlobal_RVA);
+         draw_data_addr_row("g_cameraTable", g_resolved_addresses.camera_table, kCameraTable_RVA);
+         draw_data_addr_row("g_cameraIndex", g_resolved_addresses.camera_index, kCameraIndex_RVA);
          draw_data_addr_row("g_taa_settings_obj", g_resolved_addresses.taa_settings_global, kTAASettingsGlobal_RVA);
          draw_data_addr_row("g_frame_counter", g_resolved_addresses.jitter_phase_counter, kJitterPhaseCounter_RVA);
          draw_data_addr_row("JitterPhaseMask CL imm", g_resolved_addresses.jitter_phase_mask_cl_imm, kJitterPhaseMask_CL_RVA);

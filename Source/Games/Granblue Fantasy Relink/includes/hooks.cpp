@@ -3,21 +3,53 @@
 #include "hooks.hpp"
 #include "common.hpp"
 
+namespace
+{
+uintptr_t ResolveCurrentCamera()
+{
+   if (g_resolved_addresses.camera_global != 0)
+      return g_resolved_addresses.camera_global;
+
+   const uintptr_t camera_table = g_resolved_addresses.camera_table;
+   const uintptr_t camera_index = g_resolved_addresses.camera_index;
+   if (camera_table == 0 || camera_index == 0)
+      return 0;
+
+   __try
+   {
+      const uint32_t index = *reinterpret_cast<const uint32_t*>(camera_index);
+      if (index > 0x0B)
+         return 0;
+
+      return *reinterpret_cast<const uintptr_t*>(camera_table + index * sizeof(uintptr_t));
+   }
+   __except (EXCEPTION_EXECUTE_HANDLER)
+   {
+      return 0;
+   }
+}
+}
+
 bool TryReadCameraJitter(float2& out_jitter)
 {
-   const uintptr_t camera = ResolveGBFRDataOrFallback(
-      g_resolved_addresses.camera_global,
-      kCameraGlobal_RVA);
+   const uintptr_t camera = ResolveCurrentCamera();
    if (camera == 0)
       return false;
 
-   const uintptr_t projection_ptr = *reinterpret_cast<const uintptr_t*>(camera + kCameraProjectionDataOffset);
-   if (projection_ptr == 0)
-      return false;
+   __try
+   {
+      const uintptr_t projection_ptr = *reinterpret_cast<const uintptr_t*>(camera + kCameraProjectionDataOffset);
+      if (projection_ptr == 0)
+         return false;
 
-   out_jitter.x = *reinterpret_cast<const float*>(projection_ptr + kProjectionJitterXOffset);
-   out_jitter.y = *reinterpret_cast<const float*>(projection_ptr + kProjectionJitterYOffset);
-   return true;
+      out_jitter.x = *reinterpret_cast<const float*>(projection_ptr + kProjectionJitterXOffset);
+      out_jitter.y = *reinterpret_cast<const float*>(projection_ptr + kProjectionJitterYOffset);
+      return true;
+   }
+   __except (EXCEPTION_EXECUTE_HANDLER)
+   {
+      return false;
+   }
 }
 
 void OnJitterWrite(safetyhook::Context& ctx)
