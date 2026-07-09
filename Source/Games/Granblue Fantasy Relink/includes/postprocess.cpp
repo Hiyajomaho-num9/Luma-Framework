@@ -1071,6 +1071,7 @@ static void RunLatePostProcessPasses(
 
    if (device_data.sr_type != SR::Type::None && !device_data.sr_suppressed)
    {
+      bool sr_settings_changed = false;
       auto* sr_instance_data = device_data.GetSRInstanceData();
       {
          SR::SettingsData settings_data;
@@ -1087,12 +1088,23 @@ static void RunLatePostProcessPasses(
          settings_data.mvs_x_scale = -(float)device_data.render_resolution.x;
          settings_data.mvs_y_scale = -(float)device_data.render_resolution.y;
          settings_data.render_preset = dlss_render_preset;
-         sr_implementations[device_data.sr_type]->UpdateSettings(sr_instance_data, native_device_context, settings_data);
+
+         sr_settings_changed = !game_device_data.sr_settings_valid || !(settings_data == game_device_data.last_sr_settings_data);
+         const bool update_ok = sr_implementations[device_data.sr_type]->UpdateSettings(sr_instance_data, native_device_context, settings_data);
+         if (update_ok)
+         {
+            game_device_data.last_sr_settings_data = settings_data;
+            game_device_data.sr_settings_valid = true;
+         }
+         else
+         {
+            device_data.force_reset_sr = true;
+         }
       }
 
       // Prepare SR draw data
       {
-         bool reset_sr = device_data.force_reset_sr || game_device_data.output_changed;
+         bool reset_sr = device_data.force_reset_sr || game_device_data.output_changed || sr_settings_changed;
          device_data.force_reset_sr = false;
          float jitter_x = game_device_data.table_jitter.x;
          float jitter_y = game_device_data.table_jitter.y;
@@ -1147,7 +1159,8 @@ static void RunLatePostProcessPasses(
             }
          }
 #endif
-         if (sr_implementations[device_data.sr_type]->Draw(sr_instance_data, native_device_context, draw_data))
+         const bool draw_ok = sr_implementations[device_data.sr_type]->Draw(sr_instance_data, native_device_context, draw_data);
+         if (draw_ok)
          {
             device_data.has_drawn_sr = true;
          }

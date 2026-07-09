@@ -182,6 +182,8 @@ static char __fastcall Hooked_InitializeDX11RenderingPipeline(int screen_width, 
 {
    int render_w = screen_width;
    int render_h = screen_height;
+   uintptr_t render_w_addr = 0;
+   uintptr_t render_h_addr = 0;
 
    DeviceData* device_data = g_device_data_ptr.load(std::memory_order_acquire);
    if (device_data && screen_width > 0 && screen_height > 0)
@@ -202,25 +204,27 @@ static char __fastcall Hooked_InitializeDX11RenderingPipeline(int screen_width, 
       render_w = static_cast<int>((std::max)(1u, render_dims[0]));
       render_h = static_cast<int>((std::max)(1u, render_dims[1]));
 
-      // Keep g_renderWidth/g_renderHeight in sync with the args we pass to the trampoline.
-      // CreateRenderTargets initialises these from g_outputWidth/g_outputHeight (always output
-      // dims) and never applies a scale, so without this write the frame graph sees
-      // render == output and skips the temporal upscale path every frame.
-      const uintptr_t render_w_addr = ResolveGBFRDataOrFallback(
+      // Resolve these now, but write them after the trampoline below.
+      render_w_addr = ResolveGBFRDataOrFallback(
          g_resolved_addresses.render_width,
          kRenderWidth_RVA);
-      const uintptr_t render_h_addr = ResolveGBFRDataOrFallback(
+      render_h_addr = ResolveGBFRDataOrFallback(
          g_resolved_addresses.render_height,
          kRenderHeight_RVA);
-      if (render_w_addr != 0 && render_h_addr != 0)
-      {
-         *reinterpret_cast<int*>(render_w_addr) = render_w;
-         *reinterpret_cast<int*>(render_h_addr) = render_h;
-      }
    }
 
    // Pass render dims to the game — g_outputWidth/g_outputHeight are not touched.
-   return g_rt_creation_hook.unsafe_call<char>(render_w, render_h);
+   const char result = g_rt_creation_hook.unsafe_call<char>(render_w, render_h);
+
+   // Sync after the game's RT recreation path sees the new dimensions. Pre-writing these globals
+   // can hide hot render scale changes from the game's size cache, making them restart-only.
+   if (render_w_addr != 0 && render_h_addr != 0)
+   {
+      *reinterpret_cast<int*>(render_w_addr) = render_w;
+      *reinterpret_cast<int*>(render_h_addr) = render_h;
+   }
+
+   return result;
 }
 
 // Not hooked. Hooked_InitializeDX11RenderingPipeline runs every frame and receives

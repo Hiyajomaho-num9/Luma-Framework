@@ -57,28 +57,6 @@ struct GBFRHookGlobals
    std::atomic<uintptr_t> ui_render_ctx{0};
 };
 
-#if 0
-constexpr size_t kVSSetConstantBuffers1_VTableIndex = 119;
-constexpr uintptr_t kInitializeDX11RenderingPipeline_RVA = 0x00745510;
-constexpr uintptr_t kUpdateScreenResolution_RVA = 0x005F7960;
-constexpr uintptr_t kDispatchRenderPassViewport_RVA = 0x01BFF340; // GBFR_DispatchRenderPassViewport
-constexpr uintptr_t kUIRenderOrchestrator_RVA = 0x03222A10;       // sub_143222A10 — UI pipeline entry
-constexpr uintptr_t kOutputWidth_RVA = 0x05AA41E8;                // g_outputWidth  — read by the single caller of InitializeDX11RenderingPipeline (args = these globals)
-constexpr uintptr_t kOutputHeight_RVA = 0x05AA41EC;               // g_outputHeight — same
-constexpr uintptr_t kRenderWidth_RVA = 0x05AA41E0;                // g_renderWidth  — frame graph reads this to decide temporal upscale path; must equal the args passed to InitializeDX11RenderingPipeline
-constexpr uintptr_t kRenderHeight_RVA = 0x05AA41E4;               // g_renderHeight — same
-constexpr uintptr_t kCameraGlobal_RVA = 0x068B4F90;
-constexpr uintptr_t kCameraProjectionDataOffset = 0x60;
-constexpr uintptr_t kProjectionJitterXOffset = 0x940;
-constexpr uintptr_t kProjectionJitterYOffset = 0x944;
-constexpr uintptr_t kTAASettingsGlobal_RVA = 0x05E55EA0;
-constexpr uintptr_t kJitterPhaseCounter_RVA = 0x05E61790;
-constexpr uintptr_t kJitterPhaseMask_CL_RVA = 0x01A9EB76;
-constexpr uintptr_t kJitterPhaseMask_EAX_RVA = 0x01A9EB7C;
-constexpr uintptr_t kJitterWrite_RVA = 0x01A9EB9B;
-constexpr uintptr_t kTemporalAntiAliasingComponent_Init_RVA = 0x01A9E5D0;
-#endif
-
 constexpr size_t kVSSetConstantBuffers1_VTableIndex = 119;
 constexpr uintptr_t kInitializeDX11RenderingPipeline_RVA = 0x007F9E10;
 constexpr uintptr_t kUpdateScreenResolution_RVA = 0x005F7960;

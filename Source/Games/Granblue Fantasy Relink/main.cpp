@@ -655,10 +655,49 @@ public:
       auto& game_device_data = GetGameDeviceData(device_data);
    }
 
+   void CleanExtraSRResources(DeviceData& device_data) override
+   {
+      auto& game_device_data = GetGameDeviceData(device_data);
+#if ENABLE_SR
+      game_device_data.sr_source_color = nullptr;
+      game_device_data.sr_source_color_srv = nullptr;
+      game_device_data.pre_sr_encode_texture = nullptr;
+      game_device_data.pre_sr_encode_srv = nullptr;
+      game_device_data.pre_sr_encode_rtv = nullptr;
+      game_device_data.post_sr_encode_texture = nullptr;
+      game_device_data.post_sr_encode_srv = nullptr;
+      game_device_data.post_sr_encode_rtv = nullptr;
+      game_device_data.depth_buffer = nullptr;
+      game_device_data.sr_motion_vectors = nullptr;
+      game_device_data.sr_output_color = nullptr;
+      game_device_data.sr_output_color_srv = nullptr;
+      game_device_data.draw_device_context = nullptr;
+      game_device_data.remainder_command_list = nullptr;
+      game_device_data.partial_command_list = nullptr;
+      game_device_data.output_changed = false;
+#endif
+      game_device_data.taa_temp_output_resource = nullptr;
+      game_device_data.taa_temp_output_srv = nullptr;
+      game_device_data.taa_temp_output_rtv = nullptr;
+      game_device_data.taa_output_texture = nullptr;
+      game_device_data.taa_output_texture_rtv = nullptr;
+      game_device_data.sr_settings_valid = false;
+      game_device_data.last_sr_settings_data = {};
+   }
+
    void OnInitSwapchain(reshade::api::swapchain* swapchain) override
    {
       auto& device_data = *swapchain->get_device()->get_private_data<DeviceData>();
       auto& game_device_data = GetGameDeviceData(device_data);
+#if ENABLE_SR
+      CleanExtraSRResources(device_data);
+      if (auto* sr_instance_data = device_data.GetSRInstanceData())
+      {
+         sr_instance_data->settings_data = SR::SettingsData{};
+      }
+      device_data.force_reset_sr = true;
+      device_data.has_drawn_sr = false;
+#endif
       EnsureScaledTexture(device_data, game_device_data);
    }
 
@@ -1415,13 +1454,6 @@ public:
       ImGui::PushStyleColor(ImGuiCol_Button, button_color);
       ImGui::PushStyleColor(ImGuiCol_ButtonHovered, button_hovered_color);
       ImGui::PushStyleColor(ImGuiCol_ButtonActive, button_active_color);
-#if 0
-      static const std::string mod_link = std::string("Nexus Mods Page ") + std::string(ICON_FK_SEARCH);
-      if (ImGui::Button(mod_link.c_str()))
-      {
-         system("start https://www.nexusmods.com/prey2017/mods/149");
-      }
-#endif
       static const std::string social_link = std::string("Join our \"HDR Den\" Discord ") + std::string(ICON_FK_SEARCH);
       if (ImGui::Button(social_link.c_str()))
       {
