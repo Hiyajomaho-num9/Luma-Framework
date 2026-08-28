@@ -17,10 +17,6 @@ struct GBFRResolvedAddresses
    // CameraIndex + CameraTable mechanism (v2.0.2+)
    uintptr_t camera_index = 0;
    uintptr_t camera_table = 0;
-   // CameraGlobal pointer (V1_3_2 only)
-#ifdef V1_3_2
-   uintptr_t camera_global = 0;
-#endif
    uintptr_t taa_settings_global = 0;
    // v2.0.3: Pointer address (qword) — double-deref to read TAA running flag byte.
    // qword_147371338 at RVA 0x7371338 → target byte address → byte & 1

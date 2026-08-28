@@ -1117,8 +1117,7 @@ public:
    {
       auto& game_device_data = GetGameDeviceData(device_data);
 
-      // Read TAA settings object for per-bit queries beyond the TAA-enabled flag.
-      // v2.0.3+: kTAASettingsGlobal_RVA is a 16-byte xmmword buffer, NOT a pointer.
+      // 2.0.4/2.0.5 expose an inline TAA settings buffer rather than an object pointer.
       uintptr_t settings_obj;
       TryGetSettingsObject(settings_obj);
 
@@ -1274,9 +1273,6 @@ public:
 
          draw_data_addr_row("g_renderWidth", g_resolved_addresses.render_width);
          draw_data_addr_row("g_renderHeight", g_resolved_addresses.render_height);
-#ifdef V1_3_2
-         draw_data_addr_row("g_camera", g_resolved_addresses.camera_global);
-#endif
          draw_data_addr_row("g_camera_index", g_resolved_addresses.camera_index);
          draw_data_addr_row("g_camera_table", g_resolved_addresses.camera_table);
          draw_data_addr_row("g_taa_running_flag", g_resolved_addresses.taa_running_flag);

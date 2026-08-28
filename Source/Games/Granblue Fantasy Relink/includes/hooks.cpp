@@ -41,7 +41,12 @@ bool ResolveGBFRAddresses()
       return false;
 
    const auto* dos_header = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
+   if (dos_header->e_magic != IMAGE_DOS_SIGNATURE || dos_header->e_lfanew <= 0)
+      return false;
+
    const auto* nt_headers = reinterpret_cast<const IMAGE_NT_HEADERS64*>(base + dos_header->e_lfanew);
+   if (nt_headers->Signature != IMAGE_NT_SIGNATURE || nt_headers->OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR64_MAGIC)
+      return false;
    const uint16_t major = static_cast<uint16_t>(file_version >> 48);
    const uint16_t minor = static_cast<uint16_t>(file_version >> 32);
    const uint16_t patch = static_cast<uint16_t>(file_version >> 16);
@@ -85,21 +90,6 @@ bool ResolveGBFRAddresses()
 
 bool TryReadCameraJitter(float2& out_jitter)
 {
-#ifdef V1_3_2
-   // OLD binary: CameraGlobal mechanism
-   if (g_resolved_addresses.camera_global != 0)
-   {
-      const uintptr_t camera = g_resolved_addresses.camera_global;
-      const uintptr_t projection_ptr = *reinterpret_cast<const uintptr_t*>(camera + kCameraProjectionDataOffset);
-      if (projection_ptr == 0)
-         return false;
-
-      out_jitter.x = *reinterpret_cast<const float*>(projection_ptr + kProjectionJitterXOffset);
-      out_jitter.y = *reinterpret_cast<const float*>(projection_ptr + kProjectionJitterYOffset);
-      return true;
-   }
-#else
-   // NEW binary: CameraIndex + CameraTable mechanism
    if (g_resolved_addresses.camera_index != 0 && g_resolved_addresses.camera_table != 0)
    {
       const int camera_idx = *reinterpret_cast<const int*>(g_resolved_addresses.camera_index);
@@ -119,7 +109,6 @@ bool TryReadCameraJitter(float2& out_jitter)
       out_jitter.y = *reinterpret_cast<const float*>(projection_ptr + kProjectionJitterYOffset);
       return true;
    }
-#endif
    return false;
 }
 
