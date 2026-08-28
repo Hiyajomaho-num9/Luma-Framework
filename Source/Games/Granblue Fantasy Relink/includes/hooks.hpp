@@ -3,6 +3,9 @@
 #include "hook_constants.hpp"
 #include "safetyhook.hpp"
 
+#include <mutex>
+#include <shared_mutex>
+
 struct GBFRResolvedAddresses
 {
    void* initialize_dx11_rendering_pipeline = nullptr;
@@ -14,14 +17,13 @@ struct GBFRResolvedAddresses
    uintptr_t render_width = 0;
    uintptr_t render_height = 0;
 
-   // CameraIndex + CameraTable mechanism (v2.0.2+)
+   // CameraIndex + CameraTable mechanism used by verified 2.0.4/2.0.5 builds.
    uintptr_t camera_index = 0;
    uintptr_t camera_table = 0;
    uintptr_t taa_settings_global = 0;
-   // v2.0.3: Pointer address (qword) — double-deref to read TAA running flag byte.
-   // qword_147371338 at RVA 0x7371338 → target byte address → byte & 1
+   // Pointer address (qword); double-dereference to read the TAA running flag byte.
    uintptr_t taa_running_flag = 0;
-   // v2.0.3: Pointer to struct with render scale flag at +0x65
+   // Pointer to the settings struct with the render-scale flag at +0x65.
    uintptr_t taa_render_scale_flag_ptr = 0;
    uintptr_t jitter_phase_counter = 0;
    uintptr_t taa_reset_flag = 0;
@@ -35,6 +37,8 @@ struct GBFRHookGlobals
    SafetyHookInline taa_init_hook;
 #endif
 
+   std::shared_mutex device_state_mutex;
+   std::mutex hook_install_mutex;
    std::atomic<DeviceData*> device_data_ptr = nullptr;
    std::atomic<ID3D11Device*> native_device_ptr = nullptr;
    std::atomic<uint32_t> table_jitter_x_bits{0};
@@ -52,6 +56,8 @@ inline auto& g_jitter_write_hook = g_hook_globals.jitter_write_hook;
 #ifdef PATCH_JITTER_TABLE_INIT
 inline auto& g_taa_init_hook = g_hook_globals.taa_init_hook;
 #endif
+inline auto& g_device_state_mutex = g_hook_globals.device_state_mutex;
+inline auto& g_hook_install_mutex = g_hook_globals.hook_install_mutex;
 inline auto& g_device_data_ptr = g_hook_globals.device_data_ptr;
 inline auto& g_native_device_ptr = g_hook_globals.native_device_ptr;
 inline GBFRResolvedAddresses g_resolved_addresses;

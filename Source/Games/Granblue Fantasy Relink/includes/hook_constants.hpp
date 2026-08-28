@@ -8,7 +8,7 @@
 // Runtime-selected versions:
 //   - 2.0.4: SHA-256 f827f3c13caa90b290fab2fe7e28165a80448fde0a3f7a96d79dac6b8343ff2a
 //   - 2.0.5: SHA-256 7189b958ff0fe5238cea28a2939ffdad6e3a9acb14dd274a9fcc8e7e275bd175
-// Older tables remain below for binary research but are not selected by this build.
+// Only these two verified runtime tables are compiled into this build.
 // ============================================================
 
 struct GBFRVersionAddressTable
@@ -46,7 +46,7 @@ constexpr uintptr_t kCameraProjectionDataOffset = 0x60;
 constexpr uintptr_t kProjectionJitterXOffset = 0x940;
 constexpr uintptr_t kProjectionJitterYOffset = 0x944;
 // Jitter table: 64 entries × 8 bytes (float2), offset 0x28 from TAA component*
-//   Unchanged across all versions (1.3.2/2.0.2/2.0.3/2.0.4)
+//   Unchanged across verified 2.0.4 and 2.0.5 builds.
 constexpr uintptr_t kTAAJitterTableOffset = 0x28;
 constexpr uintptr_t kTAAJitterPhaseIndexOffset = 0x24;
 constexpr size_t kTAAJitterTableCount = 64;

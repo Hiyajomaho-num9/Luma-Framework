@@ -686,10 +686,85 @@ public:
          game_device_data.prev_jitter = game_device_data.jitter;
       }
 
-      g_device_data_ptr.store(&device_data, std::memory_order_release);
-      g_native_device_ptr.store(native_device, std::memory_order_release);
+      bool addresses_verified = false;
+      bool hooks_ready = false;
+      {
+         const std::scoped_lock install_lock(g_hook_install_mutex);
+         const auto reset_hooks = []()
+         {
+            g_jitter_write_hook.reset();
+#ifdef PATCH_JITTER_TABLE_INIT
+            g_taa_init_hook.reset();
+#endif
+            g_rt_creation_hook.reset();
+         };
 
-      if (!ResolveGBFRAddresses())
+         const bool all_hooks_present = g_rt_creation_hook && g_jitter_write_hook
+#ifdef PATCH_JITTER_TABLE_INIT
+            && g_taa_init_hook
+#endif
+            ;
+         const bool all_hooks_enabled = all_hooks_present && g_rt_creation_hook.enabled()
+            && g_jitter_write_hook.enabled()
+#ifdef PATCH_JITTER_TABLE_INIT
+            && g_taa_init_hook.enabled()
+#endif
+            ;
+         if (all_hooks_enabled)
+         {
+            addresses_verified = true;
+            hooks_ready = true;
+         }
+         else
+         {
+            reset_hooks();
+            addresses_verified = ResolveGBFRAddresses();
+            if (addresses_verified)
+            {
+               g_rt_creation_hook = safetyhook::create_inline(
+                  g_resolved_addresses.initialize_dx11_rendering_pipeline,
+                  reinterpret_cast<void*>(&Hooked_InitializeDX11RenderingPipeline),
+                  safetyhook::InlineHook::StartDisabled);
+#ifdef PATCH_JITTER_TABLE_INIT
+               g_taa_init_hook = safetyhook::create_inline(
+                  g_resolved_addresses.temporal_aa_component_init,
+                  reinterpret_cast<void*>(&Hooked_TemporalAntiAliasingComponentInit),
+                  safetyhook::InlineHook::StartDisabled);
+#endif
+               g_jitter_write_hook = safetyhook::create_mid(
+                  g_resolved_addresses.jitter_write_site,
+                  &OnJitterWrite,
+                  safetyhook::MidHook::StartDisabled);
+
+               const bool creation_succeeded = g_rt_creation_hook && g_jitter_write_hook
+#ifdef PATCH_JITTER_TABLE_INIT
+                  && g_taa_init_hook
+#endif
+                  ;
+               bool enable_succeeded = creation_succeeded;
+               if (enable_succeeded)
+                  enable_succeeded = static_cast<bool>(g_jitter_write_hook.enable());
+#ifdef PATCH_JITTER_TABLE_INIT
+               if (enable_succeeded)
+                  enable_succeeded = static_cast<bool>(g_taa_init_hook.enable());
+#endif
+               if (enable_succeeded)
+                  enable_succeeded = static_cast<bool>(g_rt_creation_hook.enable());
+
+               if (!enable_succeeded)
+                  reset_hooks();
+            }
+
+            hooks_ready = g_rt_creation_hook && g_jitter_write_hook
+               && g_rt_creation_hook.enabled() && g_jitter_write_hook.enabled()
+#ifdef PATCH_JITTER_TABLE_INIT
+               && g_taa_init_hook && g_taa_init_hook.enabled()
+#endif
+               ;
+         }
+      }
+
+      if (!addresses_verified)
       {
          reshade::log::message(
             reshade::log::level::error,
@@ -701,30 +776,33 @@ public:
          reshade::log::level::info,
          std::format("Granblue Fantasy Relink 2.0.{} hook addresses verified.", g_gbfr_version_minor).c_str());
 
-      if (!g_rt_creation_hook)
+      if (!hooks_ready)
       {
-         g_rt_creation_hook = safetyhook::create_inline(
-            g_resolved_addresses.initialize_dx11_rendering_pipeline,
-            reinterpret_cast<void*>(&Hooked_InitializeDX11RenderingPipeline));
+         reshade::log::message(
+            reshade::log::level::error,
+            "Granblue Fantasy Relink: native hook transaction failed; all native hooks were rolled back.");
+         return;
       }
 
       PatchJitterPhases();
-
-#ifdef PATCH_JITTER_TABLE_INIT
-      if (!g_taa_init_hook)
       {
-         g_taa_init_hook = safetyhook::create_inline(
-            g_resolved_addresses.temporal_aa_component_init,
-            reinterpret_cast<void*>(&Hooked_TemporalAntiAliasingComponentInit));
+         const std::unique_lock state_lock(g_device_state_mutex);
+         g_hook_globals.table_jitter_valid.store(false, std::memory_order_release);
+         g_device_data_ptr.store(&device_data, std::memory_order_release);
+         g_native_device_ptr.store(native_device, std::memory_order_release);
       }
-#endif
+   }
 
-      if (!g_jitter_write_hook)
+   void OnDestroyDeviceData(DeviceData& device_data) override
+   {
+      const std::unique_lock state_lock(g_device_state_mutex);
+      if (g_device_data_ptr.load(std::memory_order_acquire) == &device_data)
       {
-         g_jitter_write_hook = safetyhook::create_mid(
-            g_resolved_addresses.jitter_write_site,
-            &OnJitterWrite);
+         g_device_data_ptr.store(nullptr, std::memory_order_release);
+         g_native_device_ptr.store(nullptr, std::memory_order_release);
+         g_hook_globals.table_jitter_valid.store(false, std::memory_order_release);
       }
+      Game::OnDestroyDeviceData(device_data);
    }
 
    void OnPresent(ID3D11Device* native_device, DeviceData& device_data) override
@@ -1517,6 +1595,13 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
    }
    else if (ul_reason_for_call == DLL_PROCESS_DETACH)
    {
+      g_device_data_ptr.store(nullptr, std::memory_order_release);
+      g_native_device_ptr.store(nullptr, std::memory_order_release);
+      g_hook_globals.table_jitter_valid.store(false, std::memory_order_release);
+      g_jitter_write_hook.reset();
+#ifdef PATCH_JITTER_TABLE_INIT
+      g_taa_init_hook.reset();
+#endif
       g_rt_creation_hook.reset();
 
       reshade::unregister_event<reshade::addon_event::execute_secondary_command_list>(GranblueFantasyRelink::OnExecuteSecondaryCommandList);

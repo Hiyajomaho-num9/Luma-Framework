@@ -4,7 +4,8 @@
 
 - Bumps the GBFR addon version to 2.
 - Supports game 2.0.4 and 2.0.5 through runtime executable-version selection.
-- Rejects unknown versions and known versions whose three native hook prologues do not match.
+- Rejects unknown versions and known versions whose native hook/reset contracts do not match.
+- Installs the three native hooks transactionally and synchronizes device-state publication across device destruction/recreation.
 - Retains the fork's native SDR/HDR selection and GBFR-specific resource handling.
 
 ## Verified executables
@@ -30,9 +31,9 @@ Rizin disassembly and exact-byte searches against both PE images established the
 | TAA running flag pointer | `0x073725B8` | `0x07372848` | 2.0.5 transition loads the qword then compares byte at target at `0x2160AA1` |
 | Render-scale settings pointer | `0x07031030` | `0x07031250` | 2.0.5 transition loads the qword then tests byte `+0x65` at `0x2160D71` |
 | Jitter phase counter | `0x0703D6B0` | `0x0703D8D0` | 2.0.5 transition loads it at `0x2160E4D`, masks with `0x3F`, and indexes `[component + phase*8 + 0x28]` |
-| TAA reset flag | `0x07372290` | `0x07372520` | Located in the same relocated data group as the running flag pointer; runtime behavior still needs in-game confirmation |
+| TAA reset flag | `0x07372290` | `0x07372520` | Paired `cmp [rip+disp32],1` / `mov [rip+disp32],0` instructions at transition offsets `+0x119/+0x122` resolve directly to the configured flag in both builds |
 
-The shifts are deliberately not treated as a universal rule: code moved by `+0x100` or `+0x340`, some data stayed fixed, and data groups moved by `+0x220` or `+0x290`. Hook functions and actively consumed TAA globals were derived from matching code and checked in the 2.0.5 consumer; the reset flag is the remaining address with lower-confidence relocation evidence.
+The shifts are deliberately not treated as a universal rule: code moved by `+0x100` or `+0x340`, some data stayed fixed, and data groups moved by `+0x220` or `+0x290`. Hook functions and actively consumed TAA globals were derived from matching code and checked in the 2.0.5 consumer. Runtime preflight also decodes both reset-flag RIP targets before installing any hook.
 
 ## Shader hooks and packaging
 

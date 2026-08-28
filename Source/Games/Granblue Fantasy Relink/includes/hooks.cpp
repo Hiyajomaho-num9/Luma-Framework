@@ -8,7 +8,7 @@
 
 namespace
 {
-   bool MatchesBytes(uintptr_t address, std::initializer_list<uint8_t> expected)
+   bool IsExecutableRange(uintptr_t address, size_t size)
    {
       MEMORY_BASIC_INFORMATION memory_info{};
       if (VirtualQuery(reinterpret_cast<const void*>(address), &memory_info, sizeof(memory_info)) == 0
@@ -17,10 +17,31 @@ namespace
          return false;
 
       const uintptr_t region_end = reinterpret_cast<uintptr_t>(memory_info.BaseAddress) + memory_info.RegionSize;
-      if (address > region_end || expected.size() > region_end - address)
+      return address <= region_end && size <= region_end - address;
+   }
+
+   bool MatchesBytes(uintptr_t address, std::initializer_list<uint8_t> expected)
+   {
+      return IsExecutableRange(address, expected.size())
+         && std::equal(expected.begin(), expected.end(), reinterpret_cast<const uint8_t*>(address));
+   }
+
+   bool MatchesRipRelativeByteInstruction(
+      uintptr_t instruction,
+      uint8_t opcode0,
+      uint8_t opcode1,
+      uint8_t immediate,
+      uintptr_t expected_target)
+   {
+      constexpr size_t instruction_size = 7;
+      if (!IsExecutableRange(instruction, instruction_size))
          return false;
 
-      return std::equal(expected.begin(), expected.end(), reinterpret_cast<const uint8_t*>(address));
+      const auto* bytes = reinterpret_cast<const uint8_t*>(instruction);
+      int32_t displacement = 0;
+      std::memcpy(&displacement, bytes + 2, sizeof(displacement));
+      return bytes[0] == opcode0 && bytes[1] == opcode1 && bytes[6] == immediate
+         && instruction + instruction_size + displacement == expected_target;
    }
 }
 
@@ -64,9 +85,12 @@ bool ResolveGBFRAddresses()
    const uintptr_t render_pipeline = base + addresses->initialize_dx11_rendering_pipeline;
    const uintptr_t jitter_write = base + addresses->jitter_write;
    const uintptr_t taa_init = base + addresses->temporal_aa_component_init;
+   const uintptr_t taa_reset_flag = base + addresses->taa_reset_flag;
    if (!MatchesBytes(render_pipeline, {0x55, 0x41, 0x57, 0x41, 0x56, 0x41, 0x55, 0x41, 0x54})
        || !MatchesBytes(jitter_write, {0x55, 0x41, 0x57, 0x41, 0x56, 0x56, 0x57, 0x53})
-       || !MatchesBytes(taa_init, {0x56, 0x48, 0x83, 0xEC, 0x40, 0xC5, 0xF8, 0x29, 0x7C, 0x24, 0x30}))
+       || !MatchesBytes(taa_init, {0x56, 0x48, 0x83, 0xEC, 0x40, 0xC5, 0xF8, 0x29, 0x7C, 0x24, 0x30})
+       || !MatchesRipRelativeByteInstruction(jitter_write + 0x119, 0x80, 0x3D, 0x01, taa_reset_flag)
+       || !MatchesRipRelativeByteInstruction(jitter_write + 0x122, 0xC6, 0x05, 0x00, taa_reset_flag))
       return false;
 
    g_gbfr_version_minor = patch;
@@ -83,7 +107,7 @@ bool ResolveGBFRAddresses()
    g_resolved_addresses.taa_running_flag = base + addresses->taa_running_flag;
    g_resolved_addresses.taa_render_scale_flag_ptr = base + addresses->taa_render_scale_flag_pointer;
    g_resolved_addresses.jitter_phase_counter = base + addresses->jitter_phase_counter;
-   g_resolved_addresses.taa_reset_flag = base + addresses->taa_reset_flag;
+   g_resolved_addresses.taa_reset_flag = taa_reset_flag;
 
    return true;
 }
@@ -114,7 +138,7 @@ bool TryReadCameraJitter(float2& out_jitter)
 
 void OnJitterWrite(safetyhook::Context& ctx)
 {
-   // v2.0.3+: Jitter stored in TAA component table at [rcx + 8*(phase&0x3F) + 0x28]
+   // 2.0.4/2.0.5 store jitter in the TAA component table at [rcx + 8*(phase&0x3F) + 0x28].
    // ctx.rcx = TemporalAntiAliasingComponent*, phase counter is global
    const uint8_t phase = *reinterpret_cast<const uint8_t*>(g_resolved_addresses.jitter_phase_counter);
    const uintptr_t jit_addr = ctx.rcx + 8 * (phase & 0x3F) + 0x28;
@@ -203,11 +227,9 @@ bool IsTAARunningThisFrame()
 
    const bool last_known = s_last_taa_running.load(std::memory_order_acquire);
 
-   // v2.0.3+: taa_running_flag is a pointer to the TAA running flag byte.
-   // Verified in TemporalAntiAliasingComponent::trans (RVA 0x215F9C0):
-   //   mov rax, cs:qword_147371338  (RVA 0x7371338) — load pointer
-   //   cmp byte ptr [rax], 0        — read byte at target address
-   //   cmp byte ptr [rax], 1        — if not 1, skip render scale adjustment
+   // Verified 2.0.4/2.0.5 profiles store a pointer to the TAA running flag byte.
+   // The transition function loads the qword, reads byte zero at its target, and
+   // skips render-scale adjustment unless that byte equals one.
    // Requires double-dereference: load pointer, then read byte.
    const uintptr_t pointer_addr = g_resolved_addresses.taa_running_flag;
    if (pointer_addr == 0)
@@ -269,32 +291,34 @@ static char __fastcall Hooked_InitializeDX11RenderingPipeline(int screen_width, 
    int render_w = screen_width;
    int render_h = screen_height;
 
-   DeviceData* device_data = g_device_data_ptr.load(std::memory_order_acquire);
-   if (device_data && screen_width > 0 && screen_height > 0)
    {
-      // screen_width/height ARE the output dims — keep output_resolution current every frame.
-      device_data->output_resolution.x = static_cast<float>(screen_width);
-      device_data->output_resolution.y = static_cast<float>(screen_height);
-
-      const float scale = render_scale;
-      const double aspect_ratio = static_cast<double>(screen_width) / screen_height;
-      auto render_dims = Math::FindClosestIntegerResolutionForAspectRatio(
-         screen_width * static_cast<double>(scale),
-         screen_height * static_cast<double>(scale),
-         aspect_ratio);
-      device_data->render_resolution.x = static_cast<float>(render_dims[0]);
-      device_data->render_resolution.y = static_cast<float>(render_dims[1]);
-
-      render_w = static_cast<int>((std::max)(1u, render_dims[0]));
-      render_h = static_cast<int>((std::max)(1u, render_dims[1]));
-
-      // Keep g_renderWidth/g_renderHeight in sync with the args we pass to the trampoline.
-      // TAA component reads these at +0x6B81058/+0x6B8105C to decide whether to run
-      // the temporal upscale path. Without this write, render == output and TUPDrawPass skips.
-      if (g_resolved_addresses.render_width != 0 && g_resolved_addresses.render_height != 0)
+      const std::shared_lock state_lock(g_device_state_mutex);
+      DeviceData* device_data = g_device_data_ptr.load(std::memory_order_acquire);
+      if (device_data && screen_width > 0 && screen_height > 0)
       {
-         *reinterpret_cast<int*>(g_resolved_addresses.render_width) = render_w;
-         *reinterpret_cast<int*>(g_resolved_addresses.render_height) = render_h;
+         // screen_width/height ARE the output dims — keep output_resolution current every frame.
+         device_data->output_resolution.x = static_cast<float>(screen_width);
+         device_data->output_resolution.y = static_cast<float>(screen_height);
+
+         const float scale = render_scale;
+         const double aspect_ratio = static_cast<double>(screen_width) / screen_height;
+         auto render_dims = Math::FindClosestIntegerResolutionForAspectRatio(
+            screen_width * static_cast<double>(scale),
+            screen_height * static_cast<double>(scale),
+            aspect_ratio);
+         device_data->render_resolution.x = static_cast<float>(render_dims[0]);
+         device_data->render_resolution.y = static_cast<float>(render_dims[1]);
+
+         render_w = static_cast<int>((std::max)(1u, render_dims[0]));
+         render_h = static_cast<int>((std::max)(1u, render_dims[1]));
+
+         // Keep g_renderWidth/g_renderHeight in sync with the args we pass to the trampoline.
+         // TAA component reads these globals to decide whether to run the temporal upscale path.
+         if (g_resolved_addresses.render_width != 0 && g_resolved_addresses.render_height != 0)
+         {
+            *reinterpret_cast<int*>(g_resolved_addresses.render_width) = render_w;
+            *reinterpret_cast<int*>(g_resolved_addresses.render_height) = render_h;
+         }
       }
    }
 
@@ -308,6 +332,7 @@ void PatchSceneBufferInHook(
    UINT firstConstant,
    UINT numConstants)
 {
+   const std::shared_lock state_lock(g_device_state_mutex);
    DeviceData* device_data = g_device_data_ptr.load(std::memory_order_acquire);
    ID3D11Device* native_device = g_native_device_ptr.load(std::memory_order_acquire);
    if (!device_data || !native_device)
